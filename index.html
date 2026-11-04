@@ -20,12 +20,17 @@ li .c{width:30px;height:30px;border-radius:50%;border:2px solid #ccd;display:fle
 li.on .c{background:#1a7f37;border-color:#1a7f37}li .t{flex:1;min-width:0}li .n{font-weight:600}li .s{font-size:13px;color:#666;word-break:break-all}
 .tools{display:flex;flex-wrap:wrap;gap:8px}.tools button{flex:1 1 30%;font-size:15px}
 label{font-size:14px;color:#555}
+.sheet{position:fixed;inset:0;background:#0008;display:none;align-items:flex-end;z-index:20}.sheet.on{display:flex}
+.sheet>div{background:#fff;width:100%;border-radius:18px 18px 0 0;padding:20px 16px 28px;text-align:center}
+.sheet .v{font-size:30px;font-weight:800;word-break:break-all;margin:8px 0 18px;letter-spacing:1px}
+#dbg{font-size:12px;color:#666;margin-top:8px;word-break:break-all;display:none}#prog{font-size:14px;color:#1f6feb;margin-top:6px;min-height:18px;text-align:center}
 </style></head><body>
 <header>條碼核對 <small id="cnt"></small></header>
 <main>
 <div id="res"></div>
 <div class="card">
-<button class="p" id="scan">📷 開始掃描</button><div id="reader"></div>
+<button class="p" id="scan">📷 開始掃描</button><div class="row" style="margin-top:8px"><button id="torch" style="display:none">🔦 手電筒</button><button id="dbgb">🐞 顯示讀取紀錄</button></div>
+<div id="reader"></div><div id="prog"></div><div id="dbg"></div>
 <div class="row" style="margin-top:10px"><input id="man" placeholder="手動輸入條碼" inputmode="text"><button id="go" style="flex:0 0 80px">比對</button></div>
 </div>
 <div class="card"><label>條碼欄位</label><select id="col" style="width:100%"></select>
@@ -33,6 +38,8 @@ label{font-size:14px;color:#555}
 <input type="file" id="file" accept=".csv,.xlsx,.xls" hidden></div>
 <div class="card"><ul id="list"></ul></div>
 </main>
+<div class="sheet" id="sheet"><div><div style="color:#666">掃到</div><div class="v" id="sv"></div>
+<div class="row"><button id="rescan">重掃</button><button class="p" id="ok">確認</button></div></div></div>
 <script>
 const K='bcs1',$=id=>document.getElementById(id);
 let S=JSON.parse(localStorage.getItem(K)||'null');
@@ -68,9 +75,21 @@ if(/\.xlsx?$/i.test(f.name)){const wb=XLSX.read(await f.arrayBuffer());rows=XLSX
 if(rows.length<2)return alert('檔案沒有資料');load(rows);e.target.value=''};
 $('clrc').onclick=()=>{if(S&&confirm('清除所有勾選？')){S.chk={};save();render()}};
 $('clrd').onclick=()=>{if(confirm('清除所有資料？（將重新載入範例）')){localStorage.removeItem(K);load(parseCSV(SAMPLE));$('res').style.display='none'}};
-let qr=null;
-$('scan').onclick=async()=>{const b=$('scan');if(qr){await qr.stop().catch(()=>{});qr.clear();qr=null;b.textContent='📷 開始掃描';return}
-try{qr=new Html5Qrcode('reader');await qr.start({facingMode:'environment'},{fps:10,qrbox:(w,h)=>({width:Math.min(w,h)*.8|0,height:Math.min(w,h)*.5|0})},t=>check(t));b.textContent='⏹ 停止掃描'}
+let qr=null,streak={v:'',n:0,t:0},raws=[],pending=null,torchOn=false;const NEED=3,WIN=1500;
+const F=Html5QrcodeSupportedFormats,FMT=[F.CODE_128,F.CODE_39,F.CODE_93,F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.QR_CODE];
+function onRead(t){t=String(t).trim();const now=Date.now();raws.unshift(t);raws=raws.slice(0,8);$('dbg').textContent='讀取紀錄：'+raws.join('｜');
+if(pending)return;if(t==streak.v&&now-streak.t<WIN)streak.n++;else streak={v:t,n:1,t:now};streak.t=now;
+$('prog').textContent=`辨識中 ${t}（${streak.n}/${NEED}）`;
+if(streak.n>=NEED){pending=t;streak={v:'',n:0,t:0};try{qr.pause(true)}catch(e){}$('prog').textContent='';$('sv').textContent=t;$('sheet').classList.add('on');navigator.vibrate&&navigator.vibrate(40)}}
+function closeSheet(){$('sheet').classList.remove('on');pending=null;if(qr)try{qr.resume()}catch(e){}}
+$('ok').onclick=()=>{const v=pending;last='';closeSheet();check(v)};
+$('rescan').onclick=()=>{closeSheet();$('prog').textContent='請重新對準條碼'};
+$('dbgb').onclick=()=>{const d=$('dbg');d.style.display=d.style.display=='block'?'none':'block'};
+$('torch').onclick=async()=>{try{torchOn=!torchOn;await qr.applyVideoConstraints({advanced:[{torch:torchOn}]});$('torch').textContent=torchOn?'🔦 關閉手電筒':'🔦 手電筒'}catch(e){torchOn=false;alert('此裝置不支援手電筒')}};
+$('scan').onclick=async()=>{const b=$('scan');if(qr){await qr.stop().catch(()=>{});qr.clear();qr=null;b.textContent='📷 開始掃描';$('torch').style.display='none';$('prog').textContent='';return}
+try{qr=new Html5Qrcode('reader',{formatsToSupport:FMT,experimentalFeatures:{useBarCodeDetectorIfSupported:true},verbose:false});
+await qr.start({facingMode:'environment'},{fps:15,qrbox:(w,h)=>{const m=Math.min(w,h)*.7|0;return{width:m,height:Math.max(80,m*.45|0)}},videoConstraints:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080},focusMode:'continuous'}},onRead);
+b.textContent='⏹ 停止掃描';try{const c=qr.getRunningTrackCapabilities();if(c&&c.torch)$('torch').style.display=''}catch(e){}}
 catch(err){qr=null;alert('無法開啟相機：'+err+'\n請確認使用 HTTPS 並允許相機權限')}};
 if(!S)load(parseCSV(SAMPLE));else render();
 </script></body></html>
