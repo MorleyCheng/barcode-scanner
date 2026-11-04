@@ -1,0 +1,76 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1f6feb"><title>條碼核對</title>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,"Noto Sans TC",sans-serif;background:#f5f6f8;color:#1b1f24}
+header{background:#1f6feb;color:#fff;padding:14px 16px;font-size:20px;font-weight:700;position:sticky;top:0;z-index:5;display:flex;justify-content:space-between;align-items:center}
+header small{font-weight:500;font-size:15px}
+main{padding:12px;max-width:600px;margin:auto}
+.card{background:#fff;border-radius:14px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px #0001}
+button,select,input{font-size:17px;min-height:48px;border-radius:10px;border:1px solid #ccd;padding:0 14px}
+button{background:#eef2f7;border:0;font-weight:600}button.p{background:#1f6feb;color:#fff;width:100%;font-size:19px}
+.row{display:flex;gap:8px}.row>*{flex:1}
+#res{display:none;text-align:center;border-radius:14px;padding:18px;color:#fff;margin-bottom:12px}
+#res b{font-size:40px;display:block}#res.ok{background:#1a7f37}#res.no{background:#cf222e}
+#reader{width:100%;margin-top:10px}
+ul{list-style:none;padding:0;margin:0}li{display:flex;gap:10px;align-items:center;padding:10px 4px;border-bottom:1px solid #eee}
+li .c{width:30px;height:30px;border-radius:50%;border:2px solid #ccd;display:flex;align-items:center;justify-content:center;color:#fff;flex:none}
+li.on .c{background:#1a7f37;border-color:#1a7f37}li .t{flex:1;min-width:0}li .n{font-weight:600}li .s{font-size:13px;color:#666;word-break:break-all}
+.tools{display:flex;flex-wrap:wrap;gap:8px}.tools button{flex:1 1 30%;font-size:15px}
+label{font-size:14px;color:#555}
+</style></head><body>
+<header>條碼核對 <small id="cnt"></small></header>
+<main>
+<div id="res"></div>
+<div class="card">
+<button class="p" id="scan">📷 開始掃描</button><div id="reader"></div>
+<div class="row" style="margin-top:10px"><input id="man" placeholder="手動輸入條碼" inputmode="text"><button id="go" style="flex:0 0 80px">比對</button></div>
+</div>
+<div class="card"><label>條碼欄位</label><select id="col" style="width:100%"></select>
+<div class="tools" style="margin-top:10px"><button id="imp">匯入 CSV/Excel</button><button id="clrc">清除勾選</button><button id="clrd">清除資料</button></div>
+<input type="file" id="file" accept=".csv,.xlsx,.xls" hidden></div>
+<div class="card"><ul id="list"></ul></div>
+</main>
+<script>
+const K='bcs1',$=id=>document.getElementById(id);
+let S=JSON.parse(localStorage.getItem(K)||'null');
+const SAMPLE=`barcode,name,note
+4710088412345,可口可樂 330ml,飲料區 A1
+4710018000012,統一麵 肉燥風味,泡麵區 B2
+4711234567890,義美小泡芙,零食區 C3
+4902102072618,日清合味道杯麵,泡麵區 B4
+8801043014809,農心辛拉麵,泡麵區 B5
+0012000161155,百事可樂 600ml,飲料區 A2
+DEMO-001,示範商品 QR 一號,QR 測試
+DEMO-002,示範商品 QR 二號,QR 測試`;
+function parseCSV(t){const r=[];let row=[],f='',q=false;t=t.replace(/^\uFEFF/,'');for(let i=0;i<t.length;i++){const c=t[i];if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=c}else if(c=='"')q=true;else if(c==','){row.push(f);f=''}else if(c=='\n'||c=='\r'){if(c=='\r'&&t[i+1]=='\n')i++;row.push(f);f='';if(row.some(x=>x.trim()))r.push(row);row=[]}else f+=c}row.push(f);if(row.some(x=>x.trim()))r.push(row);return r}
+function load(rows){const h=rows[0].map(x=>String(x).trim());const d=rows.slice(1).map(r=>h.map((_,i)=>String(r[i]??'').trim()));let c=h.findIndex(x=>/^(barcode|條碼|code|條碼編號)$/i.test(x));S={h,d,col:c<0?0:c,chk:{}};save();render()}
+function save(){localStorage.setItem(K,JSON.stringify(S))}
+const norm=v=>String(v).trim().toUpperCase();
+function render(){const s=$('col');s.innerHTML='';if(!S){$('list').innerHTML='<li>尚無資料，請匯入</li>';$('cnt').textContent='';return}
+S.h.forEach((x,i)=>s.add(new Option(x,i,false,i==S.col)));
+const ni=S.h.findIndex((x,i)=>i!=S.col);let n=0;
+$('list').innerHTML=S.d.map(r=>{const b=r[S.col],on=S.chk[norm(b)];if(on)n++;const other=r.filter((_,i)=>i!=S.col&&i!=ni).join('・');return `<li class="${on?'on':''}"><span class="c">${on?'✓':''}</span><span class="t"><div class="n">${esc(r[ni]||b)}</div><div class="s">${esc(b)}${other?'　'+esc(other):''}</div></span>${on?'<span style="color:#1a7f37;font-size:13px">已核對</span>':''}</li>`}).join('');
+$('cnt').textContent=`已找到 ${n} / 總計 ${S.d.length}`}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let last='',lt=0;
+function check(v){v=norm(v);if(!v||!S)return;const now=Date.now();if(v==last&&now-lt<2500)return;last=v;lt=now;
+const r=S.d.find(r=>norm(r[S.col])==v),e=$('res');e.style.display='block';
+if(r){S.chk[v]=1;save();render();e.className='ok';e.innerHTML=`<b>✓ 找到</b>${esc(v)}<br>${esc(r.filter((_,i)=>i!=S.col).join('・'))}`;navigator.vibrate&&navigator.vibrate(80)}
+else{e.className='no';e.innerHTML=`<b>✗ 找不到</b>${esc(v)}`;navigator.vibrate&&navigator.vibrate([60,60,60])}}
+$('go').onclick=()=>{check($('man').value);$('man').value=''};$('man').onkeydown=e=>{if(e.key=='Enter')$('go').click()};
+$('col').onchange=e=>{S.col=+e.target.value;S.chk={};save();render()};
+$('imp').onclick=()=>$('file').click();
+$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;let rows;
+if(/\.xlsx?$/i.test(f.name)){const wb=XLSX.read(await f.arrayBuffer());rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:false,defval:''})}else rows=parseCSV(await f.text());
+if(rows.length<2)return alert('檔案沒有資料');load(rows);e.target.value=''};
+$('clrc').onclick=()=>{if(S&&confirm('清除所有勾選？')){S.chk={};save();render()}};
+$('clrd').onclick=()=>{if(confirm('清除所有資料？（將重新載入範例）')){localStorage.removeItem(K);load(parseCSV(SAMPLE));$('res').style.display='none'}};
+let qr=null;
+$('scan').onclick=async()=>{const b=$('scan');if(qr){await qr.stop().catch(()=>{});qr.clear();qr=null;b.textContent='📷 開始掃描';return}
+try{qr=new Html5Qrcode('reader');await qr.start({facingMode:'environment'},{fps:10,qrbox:(w,h)=>({width:Math.min(w,h)*.8|0,height:Math.min(w,h)*.5|0})},t=>check(t));b.textContent='⏹ 停止掃描'}
+catch(err){qr=null;alert('無法開啟相機：'+err+'\n請確認使用 HTTPS 並允許相機權限')}};
+if(!S)load(parseCSV(SAMPLE));else render();
+</script></body></html>
